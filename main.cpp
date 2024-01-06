@@ -13,7 +13,7 @@ int main(int argc, char *argv[])
 
     std::cout << "hostname is  " << hostname << std::endl;
     Tracer_route traceobj(hostname);
-    traceobj.createUDPsocket(25);
+    traceobj.createUDPsocket(1);
     traceobj.pingUDP();
    
 
