@@ -1,110 +1,77 @@
 #include "tracer_route.h"
 
-Tracer_route::Tracer_route(std::string hostname_) : hostname(hostname_)
+Tracer_route::Tracer_route(const char *hostname_) : hostname(hostname_)
 {
 
-    // struct addrinfo exp, *connection;
-    exp.ai_family = AF_INET;
-    memset(&exp, 0, sizeof exp);
-    int ret = getaddrinfo(this->hostname.c_str(), "33435", &exp, &connection);
-    if (ret != 0)
-    {
-        printf("%s\n", gai_strerror(ret));
-    }
-
-    void *addr;
-    std::string ipver;
-
-    if (connection->ai_family == AF_INET)
-    {
-        struct sockaddr_in *ipv4 = (struct sockaddr_in *)connection->ai_addr;
-        addr = &(ipv4->sin_addr);
-        ipver = "IPv4";
-    }
-
-    char ipstr[INET6_ADDRSTRLEN];
-    inet_ntop(connection->ai_family, addr, ipstr, sizeof ipstr);
-    std::cout << ipver << " address: " << ipstr << std::endl;
-}
-int Tracer_route::createUDPsocket(int ttlValue)
-{
-
-    // create UDP socket
-    // Create a UDP socket
-    udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (udpSocket < 0)
-    {
-        std::cerr << "Failed to create UDP socket\n";
-        return EXIT_FAILURE;
-    }
-
-    // if (setsockopt(udpSocket, IPPROTO_IP, IP_TTL, &ttlValue, sizeof(ttlValue)) < 0)
-    // {
-    //     std::cerr << "Failed to set TTL for UDP socket\n";
-    //     close(udpSocket);
-    //     return EXIT_FAILURE;
-    // }
-    return 0;
-}
-
-void Tracer_route::pingUDP()
-{
-    // Message to send
-    char *message_ = "Hello, UDP!";
-    // memset(message, ' ', 64);
-    bool done = false;
-    int ttl = 1, max_ttl = 30; // ttl is no of hops
-    while (ttl < max_ttl)
-    {
-
-        ttl++;
-       
-        // Send the UDP message
-        ssize_t bytesSent = sendto(udpSocket, message_, strlen(message_), 0,
-                                   connection->ai_addr, connection->ai_addrlen);
-        if (bytesSent < 0)
-        {
-            std::cerr << "Failed to send UDP message\n";
-            close(udpSocket);
-            bool done = false;
-        }
-
-        std::cout << "UDP message sent to " << hostname << "\n";
-        pollfd readset;
-        readset.fd = udpSocket;
-        readset.events = 0;
-        int retval_ = poll(&readset, 1, 1000);
-        // Check results
-        if (retval_ < 0)
-        {
-            perror("poll()");
-        }
-        else if (retval_ == 0)
-        {
-
-            printf("%d  *\n", ttl);
-            continue;
-        }
-        
-    }
+    this->hostname = hostname_;
 }
 
 int Tracer_route::createICMPsocket()
 {
+    /* Creates a raw socket (SOCK_RAW) to work directly with IP packets, specifically ICMP in this case.*/
 
-    int icmpSocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (icmpSocket < 0)
-    {
-        std::cerr << "Failed to create ICMP socket\n";
-        return EXIT_FAILURE;
-    }
-    int ttlValue = 1;
+    icmpsocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    buf[4096] = {0};
+    ip_hdr = (struct ip *)buf; /* Ip header */
+    hop = 0;
 
-    if (setsockopt(icmpSocket, IPPROTO_IP, IP_TTL, &ttlValue, sizeof(ttlValue)) < 0)
+    int one = 1;
+    const int *val = &one;
+
+    /* Sets the IP_HDRINCL socket option to include the IP header when sending packets. */
+
+    if (setsockopt(icmpsocket, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0)
+        std::cout << "cannot set ttl for socket" << std::endl;
+
+    addr.sin_port = htons(this->destport);
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, this->hostname, &(addr.sin_addr));
+
+    return 0;
+}
+
+int Tracer_route::ICMPHop()
+{
+    while (hop <= 30)
     {
-        std::cerr << "Failed to set TTL for ICMP socket\n";
-        close(icmpSocket);
-        return EXIT_FAILURE;
+        ip_hdr->ip_hl = 5;
+        ip_hdr->ip_v = 4;
+        ip_hdr->ip_tos = 0;
+        ip_hdr->ip_len = 20 + 8;
+        ip_hdr->ip_id = 10000;
+        ip_hdr->ip_off = 0;
+        ip_hdr->ip_ttl = hop;
+        ip_hdr->ip_p = IPPROTO_ICMP;
+        inet_pton(AF_INET, "172.27.152.253", &(ip_hdr->ip_src)); /*  172.27.152.253 - USE your IP */
+        inet_pton(AF_INET, this->hostname, &(ip_hdr->ip_dst));
+        ip_hdr->ip_sum = csum((unsigned short *)buf, 9);
+
+        struct icmphdr *icmphd = (struct icmphdr *)(buf + 20); /* ICMP header */
+        icmphd->type = ICMP_ECHO;
+        icmphd->code = 0;
+        icmphd->checksum = 0;
+        icmphd->un.echo.id = 0;
+        icmphd->un.echo.sequence = hop + 1;
+        icmphd->checksum = csum((unsigned short *)(buf + 20), 4);
+        /* Sending ICMP Echo Request */
+        sendto(icmpsocket, buf, sizeof(struct ip) + sizeof(struct icmphdr), 0, (struct sockaddr *)&addr, sizeof addr);
+        char buff[4096] = {0};
+        struct sockaddr_in addr2;
+        socklen_t len = sizeof(struct sockaddr_in);
+        /* Receiving ICMP Echo Reply */
+        recvfrom(icmpsocket, buff, sizeof(buff), 0, (struct sockaddr *)&addr2, &len);
+        struct icmphdr *icmphd2 = (struct icmphdr *)(buff + 20);
+        if (icmphd2->type != 0)
+            std::cout << " hop limit " << hop << " Address " << inet_ntoa(addr2.sin_addr) << std::endl;
+
+        else
+        {
+            std::cout << " Reached destination " << inet_ntoa(addr2.sin_addr) << "  hop limit " << hop << std::endl;
+
+            exit(0);
+        }
+
+        hop++;
     }
 
     return 0;
