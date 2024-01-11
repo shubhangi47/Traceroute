@@ -13,9 +13,9 @@ int main(int argc, char *argv[])
     const char *hostname = argv[1];
 
     std::cout << "hostname is  " << hostname << std::endl;
-    Tracer_route traceobj(hostname);
-    traceobj.createICMPsocket();
-    traceobj.ICMPHop();
+    std::unique_ptr<Tracer_route> traceobj = std::make_unique<Tracer_route>(hostname);
+    traceobj->createICMPsocket();
+    traceobj->ICMPHop();
 
     return 0;
 }
