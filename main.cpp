@@ -1,4 +1,5 @@
 #include <iostream>
+
 #include "tracer_route.cpp"
 
 int main(int argc, char *argv[])
@@ -9,13 +10,26 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    std::string hostname = argv[1];
+    const char *hostname = argv[1];
 
     std::cout << "hostname is  " << hostname << std::endl;
     Tracer_route traceobj(hostname);
-    traceobj.createUDPsocket(1);
-    traceobj.pingUDP();
-   
+    traceobj.createICMPsocket();
+    traceobj.ICMPHop();
 
     return 0;
 }
+
+/* g++ main.cpp -o output
+  sudo ./output 8.8.8.8
+
+Output :
+hostname is  8.8.8.8
+ hop limit 0 Address 172.27.144.1
+ hop limit 1 Address 172.27.144.1
+ hop limit 2 Address 192.168.1.1
+ hop limit 3 Address 103.252.169.230
+ hop limit 4 Address 103.77.108.82
+ hop limit 5 Address 74.125.37.7
+ hop limit 6 Address 142.250.227.73
+ Reached destination 8.8.8.8  hop limit 7*/
